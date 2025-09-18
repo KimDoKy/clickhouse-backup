@@ -190,9 +190,6 @@ type ObjectStorageCredentials struct {
 	S3SSECustomerKey          string // <server_side_encryption_customer_key_base64>
 	S3SSEKMSKeyId             string // <server_side_encryption_kms_key_id>
 	S3SSEKMSEncryptionContext string // <server_side_encryption_kms_encryption_context>
-	AzureAccountName          string
-	AzureAccountKey           string
-	AzureContainerName        string
 }
 
 var DisksCredentials = xsync.NewMapOf[ObjectStorageCredentials]()
@@ -200,7 +197,6 @@ var DisksCredentials = xsync.NewMapOf[ObjectStorageCredentials]()
 type ObjectStorageConnection struct {
 	Type         string
 	S3           *storage.S3
-	AzureBlob    *storage.AzureBlob
 	MetadataPath string
 }
 
@@ -208,9 +204,6 @@ func (c *ObjectStorageConnection) GetRemoteStorage() storage.RemoteStorage {
 	switch c.Type {
 	case "s3":
 		return c.S3
-	case "azure", "azure_blob_storage":
-		return c.AzureBlob
-	}
 	log.Fatal().Stack().Msgf("invalid ObjectStorageConnection.type %s", c.Type)
 	return nil
 }
@@ -219,8 +212,6 @@ func (c *ObjectStorageConnection) GetRemoteBucket() string {
 	switch c.Type {
 	case "s3":
 		return c.S3.Config.Bucket
-	case "azure", "azure_blob_storage":
-		return c.AzureBlob.Config.Container
 	}
 	log.Fatal().Stack().Msgf("invalid ObjectStorageConnection.type %s", c.Type)
 	return ""
@@ -230,8 +221,6 @@ func (c *ObjectStorageConnection) GetRemotePath() string {
 	switch c.Type {
 	case "s3":
 		return c.S3.Config.Path
-	case "azure", "azure_blob_storage":
-		return c.AzureBlob.Config.Path
 	}
 	log.Fatal().Stack().Msgf("invalid ObjectStorageConnection.type %s", c.Type)
 	return ""
@@ -241,8 +230,6 @@ func (c *ObjectStorageConnection) GetRemoteObjectDiskPath() string {
 	switch c.Type {
 	case "s3":
 		return c.S3.Config.ObjectDiskPath
-	case "azure", "azure_blob_storage":
-		return c.AzureBlob.Config.ObjectDiskPath
 	}
 	log.Fatal().Stack().Msgf("invalid ObjectStorageConnection.type %s", c.Type)
 	return ""
@@ -394,32 +381,6 @@ func getObjectDisksCredentials(ctx context.Context, ch *clickhouse.ClickHouse) e
 				}
 				DisksCredentials.Store(diskName, creds)
 				break
-			case "azure", "azure_blob_storage":
-				creds := ObjectStorageCredentials{
-					Type: "azblob",
-				}
-				accountUrlNode := d.SelectElement("storage_account_url")
-				if accountUrlNode == nil {
-					return fmt.Errorf("%s -> /%s/storage_configuration/disks/%s doesn't contains <storage_account_url>", configFile, root.Data, diskName)
-				}
-				creds.EndPoint = strings.Trim(accountUrlNode.InnerText(), "\r\n \t")
-				containerNameNode := d.SelectElement("container_name")
-				if containerNameNode == nil {
-					return fmt.Errorf("%s -> /%s/storage_configuration/disks/%s doesn't contains <container_name>", configFile, root.Data, diskName)
-				}
-				creds.AzureContainerName = strings.Trim(containerNameNode.InnerText(), "\r\n \t")
-				accountNameNode := d.SelectElement("account_name")
-				if accountNameNode == nil {
-					return fmt.Errorf("%s -> /%s/storage_configuration/disks/%s doesn't contains <account_name>", configFile, root.Data, diskName)
-				}
-				creds.AzureAccountName = strings.Trim(accountNameNode.InnerText(), "\r\n \t")
-				accountKeyNode := d.SelectElement("account_key")
-				if accountKeyNode == nil {
-					return fmt.Errorf("%s -> /%s/storage_configuration/disks/%s doesn't contains <account_key>", configFile, root.Data, diskName)
-				}
-				creds.AzureAccountKey = strings.Trim(accountKeyNode.InnerText(), "\r\n \t")
-				DisksCredentials.Store(diskName, creds)
-				break
 			}
 		}
 	}
@@ -468,7 +429,7 @@ func makeObjectDiskConnection(ctx context.Context, ch *clickhouse.ClickHouse, cf
 	if !exists {
 		return nil, fmt.Errorf("%s is not presnet in object_disk.SystemDisks", diskName)
 	}
-	if disk.Type != "s3" && disk.Type != "s3_plain" && disk.Type != "azure_blob_storage" && disk.Type != "azure" && disk.Type != "encrypted" {
+	if disk.Type != "s3" && disk.Type != "s3_plain" && disk.Type != "encrypted" {
 		return nil, fmt.Errorf("%s have unsupported type %s", diskName, disk.Type)
 	}
 	connection.MetadataPath = disk.Path
@@ -567,45 +528,6 @@ func makeObjectDiskConnection(ctx context.Context, ch *clickhouse.ClickHouse, cf
 		s3cfg.ObjectDiskPath = s3cfg.Path
 		connection.S3 = &storage.S3{Config: &s3cfg}
 		if err = connection.S3.Connect(ctx); err != nil {
-			return nil, err
-		}
-	case "azblob":
-		connection.Type = "azure_blob_storage"
-		azureCfg := config.AzureBlobConfig{
-			Timeout:       cfg.AzureBlob.Timeout,
-			MaxBuffers:    cfg.AzureBlob.MaxBuffers,
-			MaxPartsCount: cfg.AzureBlob.MaxPartsCount,
-		}
-		azureURL, err := url.Parse(creds.EndPoint)
-		if err != nil {
-			return nil, err
-		}
-		azureCfg.EndpointSchema = "http"
-		if azureURL.Scheme != "" {
-			azureCfg.EndpointSchema = azureURL.Scheme
-		}
-		azureCfg.EndpointSuffix = azureURL.Host
-		if creds.AzureAccountName != "" {
-			azureCfg.AccountName = creds.AzureAccountName
-			azureCfg.EndpointSuffix = strings.TrimPrefix(azureCfg.EndpointSuffix, azureCfg.AccountName+".blob.")
-		}
-		if azureURL.Path != "" {
-			azureCfg.Path = azureURL.Path
-			if azureCfg.AccountName != "" && strings.HasPrefix(azureCfg.Path, "/"+creds.AzureAccountName) {
-				azureCfg.Path = strings.TrimPrefix(azureURL.Path, "/"+creds.AzureAccountName)
-			}
-			// need for CopyObject
-			azureCfg.ObjectDiskPath = azureCfg.Path
-		}
-		if creds.AzureAccountKey != "" {
-			azureCfg.AccountKey = creds.AzureAccountKey
-		}
-		if creds.AzureContainerName != "" {
-			azureCfg.Container = creds.AzureContainerName
-		}
-		azureCfg.Debug = cfg.AzureBlob.Debug
-		connection.AzureBlob = &storage.AzureBlob{Config: &azureCfg}
-		if err = connection.AzureBlob.Connect(ctx); err != nil {
 			return nil, err
 		}
 	}

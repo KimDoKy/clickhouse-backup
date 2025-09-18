@@ -190,7 +190,7 @@ func (b *Backuper) populateBackupShardField(ctx context.Context, tables []clickh
 }
 
 func (b *Backuper) isDiskTypeObject(diskType string) bool {
-	return diskType == "s3" || diskType == "azure_blob_storage" || diskType == "azure"
+	return diskType == "s3"
 }
 
 func (b *Backuper) isDiskTypeEncryptedObject(disk clickhouse.Disk, disks []clickhouse.Disk) bool {
@@ -242,9 +242,6 @@ func (b *Backuper) getEmbeddedBackupSettings(version int) []string {
 			log.Fatal().Msgf("SET s3_use_adaptive_timeouts=0 error: %v", err)
 		}
 	}
-	if b.cfg.General.RemoteStorage == "azblob" && version >= 24005000 && b.cfg.ClickHouse.EmbeddedBackupDisk == "" {
-		settings = append(settings, "allow_azure_native_copy=1")
-	}
 	return settings
 }
 
@@ -282,16 +279,6 @@ func (b *Backuper) getEmbeddedBackupLocation(ctx context.Context, backupName str
 		}
 		return "", fmt.Errorf("provide gcs->embedded_access_key and gcs->embedded_secret_key in config to allow embedded backup without `clickhouse->embedded_backup_disk`")
 	}
-	if b.cfg.General.RemoteStorage == "azblob" {
-		azblobEndpoint, err := b.ch.ApplyMacros(ctx, b.buildEmbeddedLocationAZBLOB())
-		if err != nil {
-			return "", err
-		}
-		if b.cfg.AzureBlob.Container != "" {
-			return fmt.Sprintf("AzureBlobStorage('%s','%s','%s/%s/')", azblobEndpoint, b.cfg.AzureBlob.Container, b.cfg.AzureBlob.ObjectDiskPath, backupName), nil
-		}
-		return "", fmt.Errorf("provide azblob->container and azblob->account_name, azblob->account_key in config to allow embedded backup without `clickhouse->embedded_backup_disk`")
-	}
 	return "", fmt.Errorf("empty clickhouse->embedded_backup_disk and invalid general->remote_storage: %s", b.cfg.General.RemoteStorage)
 }
 
@@ -301,10 +288,6 @@ func (b *Backuper) applyMacrosToObjectDiskPath(ctx context.Context) error {
 		b.cfg.S3.ObjectDiskPath, err = b.ch.ApplyMacros(ctx, b.cfg.S3.ObjectDiskPath)
 	} else if b.cfg.General.RemoteStorage == "gcs" {
 		b.cfg.GCS.ObjectDiskPath, err = b.ch.ApplyMacros(ctx, b.cfg.GCS.ObjectDiskPath)
-	} else if b.cfg.General.RemoteStorage == "azblob" {
-		b.cfg.AzureBlob.ObjectDiskPath, err = b.ch.ApplyMacros(ctx, b.cfg.AzureBlob.ObjectDiskPath)
-	} else if b.cfg.General.RemoteStorage == "ftp" {
-		b.cfg.FTP.ObjectDiskPath, err = b.ch.ApplyMacros(ctx, b.cfg.FTP.ObjectDiskPath)
 	} else if b.cfg.General.RemoteStorage == "sftp" {
 		b.cfg.SFTP.ObjectDiskPath, err = b.ch.ApplyMacros(ctx, b.cfg.SFTP.ObjectDiskPath)
 	} else if b.cfg.General.RemoteStorage == "cos" {
@@ -359,24 +342,10 @@ func (b *Backuper) buildEmbeddedLocationGCS() string {
 	return gcsBackupURL.String()
 }
 
-func (b *Backuper) buildEmbeddedLocationAZBLOB() string {
-	azblobBackupURL := url.URL{}
-	azblobBackupURL.Scheme = b.cfg.AzureBlob.EndpointSchema
-	// https://github.com/Altinity/clickhouse-backup/issues/1031
-	if b.cfg.AzureBlob.EndpointSuffix == "core.windows.net" {
-		azblobBackupURL.Host = b.cfg.AzureBlob.AccountName + ".blob." + b.cfg.AzureBlob.EndpointSuffix
-	} else {
-		azblobBackupURL.Host = b.cfg.AzureBlob.EndpointSuffix
-		azblobBackupURL.Path = b.cfg.AzureBlob.AccountName
-	}
-	return fmt.Sprintf("DefaultEndpointsProtocol=%s;AccountName=%s;AccountKey=%s;BlobEndpoint=%s;", b.cfg.AzureBlob.EndpointSchema, b.cfg.AzureBlob.AccountName, b.cfg.AzureBlob.AccountKey, azblobBackupURL.String())
-}
 
 func (b *Backuper) getObjectDiskPath() (string, error) {
 	if b.cfg.General.RemoteStorage == "s3" {
 		return b.cfg.S3.ObjectDiskPath, nil
-	} else if b.cfg.General.RemoteStorage == "azblob" {
-		return b.cfg.AzureBlob.ObjectDiskPath, nil
 	} else if b.cfg.General.RemoteStorage == "gcs" {
 		return b.cfg.GCS.ObjectDiskPath, nil
 	} else if b.cfg.General.RemoteStorage == "cos" {

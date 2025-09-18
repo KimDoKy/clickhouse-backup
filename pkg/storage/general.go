@@ -60,15 +60,6 @@ func (bd *BackupDestination) RemoveBackupRemote(ctx context.Context, backup Back
 		})
 	}
 	return bd.Walk(ctx, backup.BackupName+"/", true, func(ctx context.Context, f RemoteFile) error {
-		if bd.Kind() == "azblob" {
-			if f.Size() > 0 || !f.LastModified().IsZero() {
-				return retry.RunCtx(ctx, func(ctx context.Context) error {
-					return bd.DeleteFile(ctx, path.Join(backup.BackupName, f.Name()))
-				})
-			} else {
-				return nil
-			}
-		}
 		return retry.RunCtx(ctx, func(ctx context.Context) error {
 			return bd.DeleteFile(ctx, path.Join(backup.BackupName, f.Name()))
 		})
@@ -540,22 +531,6 @@ func (bd *BackupDestination) throttleSpeed(startTime time.Time, size int64, maxS
 func NewBackupDestination(ctx context.Context, cfg *config.Config, ch *clickhouse.ClickHouse, backupName string) (*BackupDestination, error) {
 	var err error
 	switch cfg.General.RemoteStorage {
-	case "azblob":
-		azblobStorage := &AzureBlob{
-			Config: &cfg.AzureBlob,
-		}
-		if azblobStorage.Config.Path, err = ch.ApplyMacros(ctx, azblobStorage.Config.Path); err != nil {
-			return nil, err
-		}
-		if azblobStorage.Config.ObjectDiskPath, err = ch.ApplyMacros(ctx, azblobStorage.Config.ObjectDiskPath); err != nil {
-			return nil, err
-		}
-
-		return &BackupDestination{
-			azblobStorage,
-			cfg.AzureBlob.CompressionFormat,
-			cfg.AzureBlob.CompressionLevel,
-		}, nil
 	case "s3":
 		s3Storage := &S3{
 			Config:      &cfg.S3,

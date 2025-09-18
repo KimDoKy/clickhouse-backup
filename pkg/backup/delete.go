@@ -396,14 +396,6 @@ func (b *Backuper) cleanBackupObjectDisks(ctx context.Context, backupName string
 	//walk absolute path, delete relative
 	deletedKeys := uint(0)
 	walkErr := b.dst.WalkAbsolute(ctx, path.Join(objectDiskPath, backupName), true, func(ctx context.Context, f storage.RemoteFile) error {
-		if b.dst.Kind() == "azblob" {
-			if f.Size() > 0 || !f.LastModified().IsZero() {
-				deletedKeys += 1
-				return b.dst.DeleteFileFromObjectDiskBackup(ctx, path.Join(backupName, f.Name()))
-			} else {
-				return nil
-			}
-		}
 		deletedKeys += 1
 		return b.dst.DeleteFileFromObjectDiskBackup(ctx, path.Join(backupName, f.Name()))
 	})

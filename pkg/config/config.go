@@ -33,7 +33,6 @@ type Config struct {
 	API        APIConfig        `yaml:"api" envconfig:"_"`
 	FTP        FTPConfig        `yaml:"ftp" envconfig:"_"`
 	SFTP       SFTPConfig       `yaml:"sftp" envconfig:"_"`
-	AzureBlob  AzureBlobConfig  `yaml:"azblob" envconfig:"_"`
 	Custom     CustomConfig     `yaml:"custom" envconfig:"_"`
 }
 
@@ -98,27 +97,6 @@ type GCSConfig struct {
 	// 			UploadConcurrency or DownloadConcurrency in each upload and download case
 	ClientPoolSize int `yaml:"client_pool_size" envconfig:"GCS_CLIENT_POOL_SIZE"`
 	ChunkSize      int `yaml:"chunk_size" envconfig:"GCS_CHUNK_SIZE"`
-}
-
-// AzureBlobConfig - Azure Blob settings section
-type AzureBlobConfig struct {
-	EndpointSchema        string `yaml:"endpoint_schema" envconfig:"AZBLOB_ENDPOINT_SCHEMA"`
-	EndpointSuffix        string `yaml:"endpoint_suffix" envconfig:"AZBLOB_ENDPOINT_SUFFIX"`
-	AccountName           string `yaml:"account_name" envconfig:"AZBLOB_ACCOUNT_NAME"`
-	AccountKey            string `yaml:"account_key" envconfig:"AZBLOB_ACCOUNT_KEY"`
-	SharedAccessSignature string `yaml:"sas" envconfig:"AZBLOB_SAS"`
-	UseManagedIdentity    bool   `yaml:"use_managed_identity" envconfig:"AZBLOB_USE_MANAGED_IDENTITY"`
-	Container             string `yaml:"container" envconfig:"AZBLOB_CONTAINER"`
-	AssumeContainerExists bool   `yaml:"assume_container_exists" envconfig:"AZBLOB_ASSUME_CONTAINER_EXISTS"`
-	Path                  string `yaml:"path" envconfig:"AZBLOB_PATH"`
-	ObjectDiskPath        string `yaml:"object_disk_path" envconfig:"AZBLOB_OBJECT_DISK_PATH"`
-	CompressionLevel      int    `yaml:"compression_level" envconfig:"AZBLOB_COMPRESSION_LEVEL"`
-	CompressionFormat     string `yaml:"compression_format" envconfig:"AZBLOB_COMPRESSION_FORMAT"`
-	SSEKey                string `yaml:"sse_key" envconfig:"AZBLOB_SSE_KEY"`
-	MaxBuffers            int    `yaml:"buffer_count" envconfig:"AZBLOB_MAX_BUFFERS"`
-	MaxPartsCount         int64  `yaml:"max_parts_count" envconfig:"AZBLOB_MAX_PARTS_COUNT"`
-	Timeout               string `yaml:"timeout" envconfig:"AZBLOB_TIMEOUT"`
-	Debug                 bool   `yaml:"debug" envconfig:"AZBLOB_DEBUG"`
 }
 
 // S3Config - s3 settings section
@@ -293,8 +271,6 @@ func (cfg *Config) GetArchiveExtension() string {
 		return ArchiveExtensions[cfg.FTP.CompressionFormat]
 	case "sftp":
 		return ArchiveExtensions[cfg.SFTP.CompressionFormat]
-	case "azblob":
-		return ArchiveExtensions[cfg.AzureBlob.CompressionFormat]
 	default:
 		return ""
 	}
@@ -312,8 +288,6 @@ func (cfg *Config) GetCompressionFormat() string {
 		return cfg.FTP.CompressionFormat
 	case "sftp":
 		return cfg.SFTP.CompressionFormat
-	case "azblob":
-		return cfg.AzureBlob.CompressionFormat
 	case "none", "custom":
 		return "tar"
 	default:
@@ -345,17 +319,15 @@ func LoadConfig(configLocation string) (*Config, error) {
 	if err := envconfig.Process("", cfgWithoutDefault); err != nil {
 		return nil, err
 	}
-	if (cfg.General.RemoteStorage == "gcs" || cfg.General.RemoteStorage == "azblob" || cfg.General.RemoteStorage == "cos") && cfgWithoutDefault.General.UploadConcurrency == 0 {
+	if (cfg.General.RemoteStorage == "gcs" || cfg.General.RemoteStorage == "cos") && cfgWithoutDefault.General.UploadConcurrency == 0 {
 		cfg.General.UploadConcurrency = uint8(runtime.NumCPU() / 2)
 	}
-	cfg.AzureBlob.Path = strings.Trim(cfg.AzureBlob.Path, "/ \t\r\n")
 	cfg.S3.Path = strings.Trim(cfg.S3.Path, "/ \t\r\n")
 	cfg.GCS.Path = strings.Trim(cfg.GCS.Path, "/ \t\r\n")
 	cfg.COS.Path = strings.Trim(cfg.COS.Path, "/ \t\r\n")
 	cfg.FTP.Path = strings.TrimRight(strings.Trim(cfg.FTP.Path, " \t\r\n"), "/")
 	cfg.SFTP.Path = strings.TrimRight(strings.Trim(cfg.SFTP.Path, " \t\r\n"), "/")
 
-	cfg.AzureBlob.ObjectDiskPath = strings.Trim(cfg.AzureBlob.ObjectDiskPath, "/ \t\n")
 	cfg.S3.ObjectDiskPath = strings.Trim(cfg.S3.ObjectDiskPath, "/ \t\r\n")
 	cfg.GCS.ObjectDiskPath = strings.Trim(cfg.GCS.ObjectDiskPath, "/ \t\r\n")
 	cfg.COS.ObjectDiskPath = strings.Trim(cfg.COS.ObjectDiskPath, "/ \t\r\n")
@@ -419,12 +391,6 @@ func ValidateConfig(cfg *Config) error {
 	}
 	if _, err := time.ParseDuration(cfg.FTP.Timeout); err != nil {
 		return fmt.Errorf("invalid ftp timeout: %v", err)
-	}
-	if _, err := time.ParseDuration(cfg.AzureBlob.Timeout); err != nil {
-		return fmt.Errorf("invalid azblob timeout: %v", err)
-	}
-	if _, err := time.ParseDuration(cfg.AzureBlob.Timeout); err != nil {
-		return fmt.Errorf("invalid azblob timeout: %v", err)
 	}
 	storageClassOk := false
 	var allStorageClasses s3types.StorageClass
@@ -502,9 +468,6 @@ func ValidateObjectDiskConfig(cfg *Config) error {
 		}
 		if cfg.General.RemoteStorage == "gcs" && ((cfg.GCS.ObjectDiskPath == "" && cfg.GCS.Path == "") || (cfg.GCS.ObjectDiskPath != "" && cfg.GCS.Path == "") || (cfg.GCS.Path != "" && strings.HasPrefix(cfg.GCS.Path, cfg.GCS.ObjectDiskPath))) {
 			return fmt.Errorf("data in objects disks, invalid gcs->object_disk_path config section, shall be not empty and shall not be prefix for gcs->path, shall not inside gcs->path if gcs->path empty")
-		}
-		if cfg.General.RemoteStorage == "azblob" && ((cfg.AzureBlob.ObjectDiskPath == "" && cfg.AzureBlob.Path == "") || (cfg.AzureBlob.ObjectDiskPath != "" && cfg.AzureBlob.Path == "") || (cfg.AzureBlob.Path != "" && strings.HasPrefix(cfg.AzureBlob.Path, cfg.AzureBlob.ObjectDiskPath))) {
-			return fmt.Errorf("data in objects disks, invalid azblob->object_disk_path config section, shall be not empty and shall not be prefix for azblob->path, shall not inside azblob->path if azblob->path empty")
 		}
 		if cfg.General.RemoteStorage == "cos" && ((cfg.COS.ObjectDiskPath == "" && cfg.COS.Path == "") || (cfg.COS.ObjectDiskPath != "" && cfg.COS.Path == "") || (cfg.COS.Path != "" && strings.HasPrefix(cfg.COS.Path, cfg.COS.ObjectDiskPath))) {
 			return fmt.Errorf("data in objects disks, invalid cos->object_disk_path config section, shall be not empty and shall not be prefix for cos->path, shall not inside cos->path if cos->path empty")
@@ -601,15 +564,6 @@ func DefaultConfig() *Config {
 			DefaultReplicaPath:               "/clickhouse/tables/{cluster}/{shard}/{database}/{table}",
 			DefaultReplicaName:               "{replica}",
 			MaxConnections:                   int(downloadConcurrency),
-		},
-		AzureBlob: AzureBlobConfig{
-			EndpointSchema:    "https",
-			EndpointSuffix:    "core.windows.net",
-			CompressionLevel:  1,
-			CompressionFormat: "tar",
-			MaxBuffers:        3,
-			MaxPartsCount:     256,
-			Timeout:           "4h",
 		},
 		S3: S3Config{
 			Region:                  "us-east-1",
