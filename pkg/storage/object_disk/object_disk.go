@@ -204,6 +204,7 @@ func (c *ObjectStorageConnection) GetRemoteStorage() storage.RemoteStorage {
 	switch c.Type {
 	case "s3":
 		return c.S3
+	}
 	log.Fatal().Stack().Msgf("invalid ObjectStorageConnection.type %s", c.Type)
 	return nil
 }

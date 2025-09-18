@@ -2105,6 +2105,7 @@ func (b *Backuper) downloadObjectDiskParts(ctx context.Context, backupName strin
 								srcBucket = b.cfg.S3.Bucket
 							} else if b.cfg.General.RemoteStorage == "gcs" {
 								srcBucket = b.cfg.GCS.Bucket
+							}
 							copiedSize := int64(0)
 							var copyObjectErr error
 							if !b.cfg.General.AllowObjectDiskStreaming {
@@ -2329,3 +2330,4 @@ func (b *Backuper) restoreEmbedded(ctx context.Context, backupName string, schem
 	}
 	return nil
 }
+
